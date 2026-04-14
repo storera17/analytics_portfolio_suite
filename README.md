@@ -33,14 +33,3 @@ python sales_forecasting_lab/train.py
 python experiment_tracking_lab/train_with_mlflow.py
 mlflow ui
 ```
-
-## Suggested GitHub topics
-
-`data-analytics` `machine-learning` `fastapi` `mlflow` `forecasting` `python` `portfolio-project`
-
-## Recommended first improvements
-
-- Replace synthetic data with a public business dataset.
-- Add screenshots of model metrics and API docs.
-- Add one short case study per project under `reports/`.
-- Deploy the FastAPI scoring app.
