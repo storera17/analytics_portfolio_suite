@@ -1,4 +1,4 @@
-# analytics-portfolio-suite
+# Analytics Portfolio Suite
 
 A multi-project portfolio repository for data analyst, data science, and business analytics applications.
 
