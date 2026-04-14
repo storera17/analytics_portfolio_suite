@@ -1,0 +1,874 @@
+---
+title: "Part 2: Tree 1 - Decision Tree"
+author: "Project Repository"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    number_sections: yes
+    theme: readable
+    toc: yes
+    toc_float: yes
+    code_download: yes
+  word_document:
+    toc: no
+---
+
+```{r setup, include=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE,warning=FALSE)
+knitr::opts_chunk$set(fig.width=6, fig.height=4)
+
+if(require(pacman)==0)
+   {install.packages("pacman")}
+pacman::p_load(devtools,caret,cluster,dplyr,fastDummies,leaps,pacman,tidyverse,skimr,fastDummies,GGally,DataExplorer,ggrepel,ggthemes,dslabs,lubridate,janitor,e1071,scales,recipes,magrittr,forcats,tidycensus,zipcodeR,tidygeocoder,tigris,sf, purrr,ROCR,rpart,rpart.plot, doParallel)
+
+if (!require(mlba)) {
+  library(devtools)
+  install_github("gedeck/mlba/mlba", force=TRUE)
+}
+pacman::p_load(mlba,tidyverse)
+```
+
+# Introduction
+**Background**
+- Decision Trees are ML algorithms used for *classification* and *regression* tasks
+- Decision Trees work by separating records into subgroups through a process of creating splits on predictor variables
+- Each split represents a result of logical rule that is transparent and easy to understand, which allows decision trees to be highly interpretable
+  - these are visually represented as branches in a tree diagram
+- *Internal Nodes* = decision based on a predictor
+- *Terminal Nodes* = also called leafs, represent outcomes
+  - Three types of *terminal/leaf nodes*
+    - each terminal node contains the final classification of "No" and "Yes" 
+    - Terminal nodes also contain two counts
+      - the number of "No" 
+      - the number of "Yes"
+    - Classification is determined by the majority class in the node
+    - nodes may be colored by their purity (homogeneity according to class), with darker colors indicating a purer node
+
+**Practical Advantages of Decision Trees**
+- Inexpensive to deploy
+- Easily automated
+- Robust to outliers
+- Automatic handling of missing data
+
+**Building Decision Trees**
+- *Classification Trees* = When target is a factor
+- *Regression Trees* = WHen target is numeric
+- Algorithms to build decision trees
+  - CART = CLASSIFICATION AND REGRESSION
+    - split on Gini(default) or Entropy (rpart())
+    -Binary splits only
+  - C4.5 
+    - split on information gain ratio
+    - multiway splits allowed
+  - CHAID = Chi-squared automatic interaction detector
+    - chi-squared test of independ
+    - multiway splits only
+- *Recursive Partitioning*: This is the process used to build the tree, where the data is repeated split into subsets based on the values of different predictors to achieve maximum homogeneity within each group
+- *Pruning*: To prevent overfitting, which occurs when a model becomes too complex and captures noise in the data, pruning data techniques are applied. Pruning simplifies the tree by removing branches that provide little predictive power, thus enhancing the model's generalizability.
+
+**First Split**
+```{r}
+# train=train %>%
+#   mutate(loan_default=factor(loan_default, levels=c("No", "Yes")))
+# skimr::skim(train)
+```
+rpart function from the rpart package is used to build the tree
+- loan_default = target variable
+- data = train - specifies the training dataset
+- method = "class" specifies that this is a classification tree because the targets is a categorical (factor) variable
+control=rpart.control(max=depth=2) specifies that the tree can grow to a maximum depth of 2
+- depth = longest path from the root node to any terminal node (maxdepth=2, tells us that this is 2, in this case)
+rpart.plots() function plots train.ct1
+- train.ct1 = object of class rpart
+- extra = 1 controls the output in the figure 
+  - option 1 specifies that the plot should include number of observations in each node
+- fallen.leaves=FALSE - controls the positioning of the lead nodes
+
+**Recursive Partitioning**
+- How it works:
+  - Start with the entire training data
+    - considering all possible splits for all predictors
+    - if predictor = continuous, it will consider all possible values as cut points
+    - if predictor = categorical, it will consider all possible categories as cut points
+    - algorithms evaluates each potential split to determine which one results in the most homogeneous subgroups 
+  - Select the best splits 
+    - "best" split is chosen based on an *impurity measure*
+      - *impurity measure* = indicates heterogeneity of nodes(subgroups) created by a split
+        -*Gini Index* - commonly used for classification
+        -*Entropy* - used in information gain
+        -*Variance Reduction* - for regression
+  - Divide the data into two groups
+    - after first split, dataset is divided into two branches
+      - Left node = Records satisfying the condition
+      - Right node = Records not satisfying the condition
+  - Repeat the Process
+    - this is repeated for each subgroup and the best split is determined 
+    - this process is recursive because the splitting is applied repeatedly to each resulting subgroup, not just once.
+  - Stop splitting
+    - the process continues until 
+      - a minimum number of observations per node is reached
+      - no split significantly improves the purity
+      - maximum depth is reached
+      - tree achieves pure nodes (all records belong to the same class)
+      - some other predefined stopping criteria is met
+- control=rpart.control(maxdepth=3, minbucket=5) specifies that the tree should have, at most, 3 splits and that any node with fewer than 5 records should not be split further.
+
+**How is Splitting Determined?**
+-Examination of each predictor and all possible split values for each variable to find the best split
+  - possible split values for each variable are simply the values of each predictors for numerics
+- possible splits are ranked accordiing to how much the split will reduce the impurity of the node
+  - reduction of impurity is defined as the overall impurity before the split minus the sum of the impurities for the two nodes that result from the split
+- for categorical splits, the algorithm works the same way, but the splits choices inlcude all ways that the categorical variable can be divided into subsets
+
+**Impurity Measures**
+- There are many ways to measure the impurity of a node. 
+- The two common approaches that will be discussed and used here are Gini Index and Entropy
+  - These apply to categorical (factor) targets
+- For numeric targets, we use the variance reduction 
+
+**Gini Index**
+- There is an equation that applies to this. 
+- *Combining Impurity Across Nodes*: The impurity of a split is the weighted average of the impurity of the two resultant nodes. The weights are the proportion of records in each node. 
+
+**Entropy**
+- Entropy approaches zero when all records in the node belong to the same class
+- Entropy equals 1 when all records are evenly distributed between the two classes. 
+
+**Largest Reduction in Impurtiy**
+- By computing the reduction in impurity (using one fo the measures) for all possible splits, the algorithm can determine the split resulting in the largest reduction. 
+- This process is repeated recursively until the stopping criteria are met. 
+
+**Controlling Impurity Measure**
+For Classification trees, we can control the impurity measure used to evalaute splits with the parms parameter of the rpart() function. The default is parms=list(split="gini"), which uses Gini. To use Entropy Index, we can set parms =listg(split="information").
+
+**Overfitting** 
+- Occurs when a model is too complex and captures noise instead of the underlying pattern
+- Decision Trees are prone to overfitting. The tree can become too deep and complex
+- It is important to evaluate the tree on unseen (holdout) data to avoid overfitting
+
+**Deeper Tree**
+- The next thing to do is build a full classification tree by adjusting the parameters in the rpart() function.
+- Understanding the rpart.control arguments:
+  - cp = 0 controls the complexity parameter. The complexity parameter determines how much split must improve the model to be kept. By setting cp=0, we are forcing the tree to grow as much as possible. 
+  -minsplit=1 controls the minimum number of records in a node that is required for the node to be split. By setting minsplit=1, we are allowing the tree to split nodes until there is only one record per node.
+- Consequences of the choices:
+  - An overfit tree will be built that will perform poorly on unseen data 
+
+**Comparing Performances**
+- We compare the performance of the default tree and the deeper tree using a confusion matrix
+- The predict() function is used to apply the model to the training and holdout data'
+  - The argument type="class" specifies to return the predicted class
+- The confusionMatrix() function is used to create the confusion matrix
+  - Order matters here, the first argument gives the predicted class. The second argument gives the actual class. 
+  - Always specify the positive class with the positive argument. This is the class you are predicting.
+  
+**General Performance Notes**
+- a very large tree will give perfect classification on the training data, but will perform poorly on the holdout sample
+
+**Controlling Tree Size**
+- There are two main ways to control the size of a tree:
+  - Stop the growth of the tree
+  - Prine the tree after it is fully grown
+
+**Controlling Growth with rpart.control()**
+- Control growth of tree by setting the following parameters in the rpart.control() function
+  - minsplit: Minimum number of records in a node (before split) that is required for the node to be split. Default is 20
+  - minbucket: Minimum number fo records that must be present in each node after a split for the split to be retained. Default is minsplit/3
+  - maxdepth: Maximum depth of any node in the final tree. Root node is depth = 0. First split is 1. Default is 30. The tree may split fewer than maxdepth times as this is the maximum number of splits allowed. 
+  - cp: complexity parameter. During tree growth, a potential split is kept only if it decreases total resubstitution error by at least cp * R(root), where R(root) is the N * (1 - pmajority) when the target is categorical
+    - default is 0.01, meaning the split must reduce the sum of the node impurities weighted by node size by at least 1% of the root node's error to be accepted.
+    - Larger values of cp result in smaller trees because fewer splits meet this improvement 
+    - Smaller values of cp result in deeper, more complex trees because smaller improvements are enough to justify a split
+    - cp is also used later during pruning where it acts as the penalty per terminal node when deciding how far to prune back a maximal treee
+
+**Pruning the Tree**
+- Mitigation of overfitting can be catalyzed by the pruning of a tree. *Pruning* exists to successively select a decision node and redesignate it as a leaf node. 
+  - Pruining trades off the fit of the tree against the complexity (number of terminal nodes)
+  - Best practice for pruning a decision tree is to use cross-validation to select optimal pruning level. 
+  - *Tree instability*: Even if the method mitigates overfitting, decision trees can be very sample dependent, meaning the splits and final tree depend on the first split. A small chnage in the sampling (impurity measure) can lead to very different splits and tree structures. 
+
+**Cross-Validation with Decision Trees**
+We will use k-fold cross validation which means we will make k different training and validaiton samples. We refer to those k samples as folds. 
+
+*k-fold Cross Validation Explained*
+- The data is partitioned into k equally sized parts
+- The first fold is used as the validation sample and the other k-1 parts are used as training sample
+- This is repeated k times so that each fold (part) is used as the validation sample once
+- Performance metrics are typically averaged over the k folds to give an overall performance metric
+- At each step of cross validation, we will
+  - Construct a tree using the pooled data from (k-1) training folds
+  - Evaluate each model using its corresponding kth validation set
+  - Repeat this for all k folds
+  - Average the performance of the k models to get a more reliable estimate of performance and help mitigate the dependence of the models on the sample data
+
+*Using k-fold Cross Validation to Prune a Tree with rpart*
+- How rpart uses cp with cross-validation pruning:
+  - Partition the training data into k folds for cross-validation (by default, k = 10)
+  - Inside each training fold, train a maximal tree on the k-1 training folds and evaluate on the held out fold. This tree is grown until no further splits meet improvement threshold set by the stopping rules (e.g., minsplit, maxdepth, cp) or until stopping criteria like minsplit or maxdepth are reached.
+  - Generate a sequence of nested subtrees via cost-complexity pruning:
+    - Each internal node, t, compute smallest value of cp for which pruning the subtree rooted at node t would increase the penalized error the least. Here, the total error is penalized by the number of terminal nodes (complexity)
+  - Evaluate each pruned subtree (corresponding to a cp value) using internal k-fold cross-validation amd compute the cross-validated relative error (xerror) and its standard error (xstd)
+  - Identify the cp value that corresponds to the minimum xerror
+  - Once you select the cp value from 5, you will prune the model using the prune() function
+  - The final model returned by prune() is the pruned subtree fit using the full training data and the selected optimal cp value
+
+# Load and Survey Data
+**Loading in Data**
+*The 'train.csv' file was loaded in with the code below, this was named df_raw because it is 'raw' unstructured data. The argument stringAsFactors = TRUE converts character variables into factors. 
+```{r}
+# train <- readRDS("3B_Project Team_train_raw.rds")
+# hold <- readRDS("3B_Project Team_holdout_raw.rds")
+# ctrain <- readRDS("3B_Project Team_train_clean.rds")
+# chold <- readRDS("3B_Project Team_holdout_clean.rds")
+# ctrain <- readRDS("train_clean_1.rds")
+# chold <- readRDS("train_clean_1.rds")
+ctrain <- readRDS("train_clean_4.rds")
+chold <- readRDS("hold_clean_4.rds")
+```
+
+**Preview/Check**
+Everything checks out and looks ready to start building our first tree based on the entire dataset. 
+```{r}
+# skimr::skim(train)
+# skimr::skim(hold)
+# 
+# ctrain <- ctrain %>%
+#   mutate(loan_default=factor(loan_default, levels=c("No", "Yes")))
+# 
+# chold <- hold %>%
+#   mutate(loan_default=factor(loan_default, levels=c("No", "Yes")))
+
+```
+# Building Decision Tree with an Imbalanced Training Dataset
+**Default Tree - Gini Index Impurity Measure**
+*Build Tree*
+The tree built below is built off of the impurity measure gini index. Futher explanation can be elaborate via the use of stopping criteria synonymous to each tree created without using cross validation. In other words, holding all building elements constant, what is the optimal tree without overfitting we can build with just changing the split impurity method. As stated, the tree below utilizes the impurity measure of gini index. 
+```{r}
+set.seed(123)
+gini.ct = rpart(
+  loan_default ~ ., # target variable
+  data = ctrain, # data source for training default tree
+  method = "class", #classification tree
+  parms=list(split="gini"), # Impurity measure = gini
+  control=rpart.control(maxdepth=30, 
+                        minbucket=5, 
+                        xval=0, # no cross validation
+                        cp=0.0002465959)
+  )
+#saveRDS(gini.ct, "st_im_gini_clean_1.rds")
+printcp(gini.ct)
+```
+*Prune and Print*
+Since we have the best cp value, we can print our tree. We will use the prune() function to "trim" the tree based on the optimal cp value we found. Next, we will print the tree. The resulting printed tree below is the result of our pruning!
+```{r}
+gini_tree=prune(gini.ct, cp=0.0002465959)
+rpart.plot(gini_tree, extra=1, fallen.leaves=FALSE)
+```
+
+*Obtain Variable Importance*
+Variable importance measures how much each predictor contributes to the decision-making process in a decision tree model. In rpart variable importance is computed by summing the total improvement in node impurity (Gini index or entropy) across all splits where that variable is used, weighted by the number of observations for those nodes. The code below gives the variable importance for our pruned tree above.
+
+```{r}
+# print(gini_tree$variable.importance)
+```
+Interestingly, the top five most important variables were found to be sub_grade_score, debt_settlement_flag, installment_to_loanamnt, term, and fico_score.
+
+*Print Tree Rules*
+Here, we print the rules used for each split in our "gini-controlled" tree. 
+```{r}
+# rpart.rules(gini.ct, 
+#              style="tall"
+#             )
+```
+Analysis of the tree performance will be discussed in the concluding section where we report our results of all trees using a confusion matrix and other analytical tools to measure the our default tree performances. 
+
+**Default Tree - Entropy Index Impurity Measure**
+*Build Tree*
+The tree built below is built off of the impurity measure entropy. Futher explanation can be elaborate via the use of stopping criteria synonymous to each tree created without using cross validation. In other words, holding all building elements constant, what is the optimal tree without overfitting we can build with just changing the split impurity method. As stated, the tree below utilizes an impurity measure of entropy index. 
+```{r}
+set.seed(123)
+entropic.ct = rpart(
+  loan_default ~ ., # target variable
+  data = ctrain, # data source for training default tree
+  method = "class", #classification tree
+  parms=list(split="information"), # sets impurity measure to entropy 
+  control=rpart.control(maxdepth=30, 
+                        minbucket=5, 
+                        xval=0, # no cross validation
+                        cp=0.0001977532)
+  )
+saveRDS(entropic.ct, "st_im_s_clean_2.rds")
+printcp(entropic.ct)
+```
+*Prune and Print*
+Since we have the best cp value, we can print our tree. We will use the prune() function to "trim" the tree based on the optimal cp value we found. Next, we will print the tree. The resulting printed tree below is the result of our pruning! We will call the entropy-based tree 'S_tree' because S represents the state function of entropy in physical science terms. 
+```{r}
+S_tree=prune(entropic.ct, cp=0.0001977532)
+rpart.plot(S_tree, extra=1, fallen.leaves=FALSE)
+```
+
+*Obtain Variable Importance*
+Variable importance measures how much each predictor contributes to the decision-making process in a decision tree model. In rpart variable importance is computed by summing the total improvement in node impurity (Gini index or entropy) across all splits where that variable is used, weighted by the number of observations for those nodes. The code below gives the variable importance for our pruned tree above.
+
+```{r}
+# print(S_tree$variable.importance)
+```
+
+Interestingly, the top five most important variables were found to be sub_grade_score, debt_settlement_flag, installment_to_loanamnt, term, and fico_score, the same variables as for gini index. 
+
+*Print Tree Rules*
+Here, we print the rules used for each split in our "gini-controlled" tree. 
+```{r}
+# rpart.rules(entropic.ct, 
+#              style="tall"
+#             )
+```
+Analysis of the tree performance will be discussed in the concluding section where we report our results of all trees using a confusion matrix and other analytical tools to measure the our default tree performances.
+
+**Prune Tree with Cross Validation**
+*Build Tree with Cross Validation*
+We did prune the trees above, but that was to the optimal cp found using cross validation here. The impurity measure used here in the cross-validated tree below is gini by default. We cross validated on 10 folds. We printed the complexity parameter table using the printcp() function. 
+```{r}
+set.seed(123)
+cv_tree=rpart(loan_default ~ ., 
+                 data=ctrain, 
+                 method="class",
+                 parms=list(split="gini"),
+                 control=rpart.control(
+                   maxdepth=30,
+                   cp=0.0001977532, 
+                                       xval=15)
+                )
+# saveRDS(cv_tree, "st_im_gini_cv_clean_2.rds")
+printcp(cv_tree) # print the cp results for each model size
+```
+
+```{r}
+set.seed(123)
+scv_tree=rpart(loan_default ~ ., 
+                 data=ctrain, 
+                 method="class",
+                 parms=list(split="information"),
+                 control=rpart.control(cp=0.0002358743, xval=15)
+                )
+saveRDS(scv_tree, "st_im_s_cv_clean_2.rds")
+printcp(scv_tree) # print the cp results for each model size
+```
+
+*Plot cp Values*
+Here, we are plotting cp results to eventually get the best cp value. 
+```{r}
+plotcp(cv_tree) # plot the cp results against model size
+```
+
+```{r}
+plotcp(scv_tree) # plot the cp results against model size
+```
+*Extract Best cp*
+The code below extracts the best cp value. 
+```{r}
+best_cp=cv_tree$cptable[which.min(cv_tree$cptable[,"xerror"]), "CP"] #pick the tree with the lowest cross validated error
+print(best_cp)
+```
+
+```{r}
+sbest_cp=scv_tree$cptable[which.min(scv_tree$cptable[,"xerror"]), "CP"] #pick the tree with the lowest cross validated error
+print(sbest_cp)
+```
+
+*Select and Print Best Pruned Tree*
+Once we have the best cp value, we can select the best pruned tree and show it using the rpart.plot() function. 
+```{r}
+pruned_tree=prune(cv_tree, cp=best_cp)
+rpart.plot(pruned_tree, extra=1, fallen.leaves=FALSE)
+```
+
+```{r}
+spruned_tree=prune(scv_tree, cp=sbest_cp)
+rpart.plot(spruned_tree, extra=1, fallen.leaves=FALSE)
+```
+*Obtain Variable Importance*
+Variable importance measures how much each predictor contributes to the decision-making process in a decision tree model. In rpart variable importance is computed by summing the total improvement in node impurity (Gini index or entropy) across all splits where that variable is used, weighted by the number of observations for those nodes. The code below gives the variable importance for our pruned tree above.
+
+```{r}
+ print(pruned_tree$variable.importance)
+```
+
+```{r}
+print(spruned_tree$variable.importance)
+```
+Higher importance values indicate greater influence on the model's predictions. The five most important variables for our pruned tree were found to be sub_grade_score, debt_settlement_flag, installment_to_loanamnt, term, and fico score. 
+
+# Building Decision Tree with a Balanced Training Dataset 
+> We first need to undersample the majority class in order to get a 50/50 ratio of Yes and No for loan default. 
+
+Here, we undersample the data, such the the number for each class is equivalent.
+```{r}
+set.seed(123)
+maj <- ctrain %>% dplyr::filter(loan_default == "No")
+min <- ctrain %>% dplyr::filter(loan_default == "Yes")
+maj_under <- maj %>% dplyr::sample_n(nrow(min))
+train_us <- dplyr::bind_rows(min, maj_under) %>% dplyr::slice_sample(prop = 1)
+prop.table(table(train_us$loan_default))
+```
+**Default Tree - Gini Index Impurity Measure**
+*Build Tree*
+The tree built below is built off of the impurity measure gini index. Futher explanation can be elaborate via the use of stopping criteria synonymous to each tree created without using cross validation. In other words, holding all building elements constant, what is the optimal tree without overfitting we can build with just changing the split impurity method. As stated, the tree below utilizes the impurity measure of gini index. 
+```{r}
+set.seed(123)
+gini.ct.us = rpart(
+  loan_default ~ ., # target variable
+  data = train_us, # data source for training default tree
+  method = "class", #classification tree
+  parms=list(split="gini"), # Impurity measure = gini
+  control=rpart.control(maxdepth=30, 
+                        minbucket=5, 
+                        xval=0, # no cross validation
+                        cp=0.0002090704)
+  )
+saveRDS(gini.ct.us, "st_bal_gini_clean_2.rds")
+printcp(gini.ct.us)
+```
+*Prune and Print*
+Since we have the best cp value, we can print our tree. We will use the prune() function to "trim" the tree based on the optimal cp value we found. Next, we will print the tree. The resulting printed tree below is the result of our pruning!
+```{r}
+gini_tree_us=prune(gini.ct.us, cp=0.0002090704)
+rpart.plot(gini_tree_us, extra=1, fallen.leaves=FALSE)
+```
+
+*Obtain Variable Importance*
+Variable importance measures how much each predictor contributes to the decision-making process in a decision tree model. In rpart variable importance is computed by summing the total improvement in node impurity (Gini index or entropy) across all splits where that variable is used, weighted by the number of observations for those nodes. The code below gives the variable importance for our pruned tree above.
+
+```{r}
+print(gini_tree_us$variable.importance)
+```
+Interestingly, the top five most important variables were found to be sub_grade_score, debt_settlement_flag, installment_to_loanamnt, term, and fico_score.
+
+*Print Tree Rules*
+Here, we print the rules used for each split in our "gini-controlled" tree. 
+```{r}
+# rpart.rules(gini.ct.us, 
+#              style="tall"
+#             )
+```
+Analysis of the tree performance will be discussed in the concluding section where we report our results of all trees using a confusion matrix and other analytical tools to measure the our default tree performances. 
+
+**Default Tree - Entropy Index Impurity Measure**
+*Build Tree*
+The tree built below is built off of the impurity measure entropy. Futher explanation can be elaborate via the use of stopping criteria synonymous to each tree created without using cross validation. In other words, holding all building elements constant, what is the optimal tree without overfitting we can build with just changing the split impurity method. As stated, the tree below utilizes an impurity measure of entropy index. 
+```{r}
+set.seed(123)
+entropic.ct.us = rpart(
+  loan_default ~ ., # target variable
+  data = train_us, # data source for training default tree
+  method = "class", #classification tree
+  parms=list(split="information"), # sets impurity measure to entropy 
+  control=rpart.control(maxdepth=20, 
+                        minbucket=5, 
+                        xval=0, # no cross validation
+                        cp=0.0001822665)
+  )
+saveRDS(entropic.ct.us, "st_bal_s_clean_2.rds")
+printcp(entropic.ct.us)
+```
+
+*Prune and Print*
+Since we have the best cp value, we can print our tree. We will use the prune() function to "trim" the tree based on the optimal cp value we found. Next, we will print the tree. The resulting printed tree below is the result of our pruning! We will call the entropy-based tree 'S_tree' because S represents the state function of entropy in physical science terms. 
+```{r}
+S_tree_us=prune(entropic.ct.us, cp=0.0002215789)
+rpart.plot(S_tree_us, extra=1, fallen.leaves=FALSE)
+```
+
+*Obtain Variable Importance*
+Variable importance measures how much each predictor contributes to the decision-making process in a decision tree model. In rpart variable importance is computed by summing the total improvement in node impurity (Gini index or entropy) across all splits where that variable is used, weighted by the number of observations for those nodes. The code below gives the variable importance for our pruned tree above.
+```{r}
+print(S_tree_us$variable.importance)
+```
+
+Interestingly, the top five most important variables were found to be sub_grade_score, debt_settlement_flag, installment_to_loanamnt, term, and fico_score, the same variables as for gini index. 
+
+*Print Tree Rules*
+Here, we print the rules used for each split in our "gini-controlled" tree. 
+```{r}
+# rpart.rules(entropic.ct.us, 
+#              style="tall"
+#             )
+```
+Analysis of the tree performance will be discussed in the concluding section where we report our results of all trees using a confusion matrix and other analytical tools to measure the our default tree performances.
+
+**Prune Tree with Cross Validation**
+*Build Tree with Cross Validation*
+We did prune the trees above, but that was to the optimal cp found using cross validation here. The impurity measure used here in the cross-validated tree below is gini by default. We cross validated on 10 folds. We printed the complexity parameter table using the printcp() function. 
+```{r}
+# gini
+set.seed(123)
+g_cv_tree_us=rpart(loan_default ~ ., 
+                 data=train_us, 
+                 method="class",
+                 parms=list(split="gini"), # sets impurity measure to entropy 
+                 control=rpart.control(maxdepth=30, 
+                        minbucket=2, 
+                        xval=10,
+                        cp=0 # no cross validation
+                 )
+                )
+saveRDS(g_cv_tree_us, "st_bal_gini_cv_clean_2.rds")
+printcp(g_cv_tree_us) # print the cp results for each model size
+```
+
+```{r}
+# entropy
+set.seed(123)
+s_cv_tree_us=rpart(loan_default ~ ., 
+                 data=train_us, 
+                 method="class",
+                 parms=list(split="information"), # sets impurity measure to entropy 
+                 control=rpart.control(maxdepth=30, 
+                        minbucket=2, 
+                        xval=10, 
+                        cp=0.00034309 # no cross validation
+                        )
+                )
+saveRDS(s_cv_tree_us, "st_bal_s_cv_clean_2.rds")
+printcp(s_cv_tree_us) # print the cp results for each model size
+```
+
+*Plot cp Values*
+Here, we are plotting cp results to eventually get the best cp value. 
+```{r}
+plotcp(g_cv_tree_us) # plot the cp results against model size
+```
+
+```{r}
+plotcp(s_cv_tree_us)
+```
+
+*Extract Best cp*
+The code below extracts the best cp value. 
+```{r}
+g_best_cp_us=g_cv_tree_us$cptable[which.min(g_cv_tree_us$cptable[,"xerror"]), "CP"] #pick the tree with the lowest cross validated error
+print(g_best_cp_us)
+```
+
+```{r}
+s_best_cp_us=s_cv_tree_us$cptable[which.min(s_cv_tree_us$cptable[,"xerror"]), "CP"] #pick the tree with the lowest cross validated error
+print(s_best_cp_us)
+```
+
+*Select and Print Best Pruned Tree*
+Once we have the best cp value, we can select the best pruned tree and show it using the rpart.plot() function. 
+```{r}
+g_pruned_tree_us=prune(g_cv_tree_us, cp=g_best_cp_us)
+rpart.plot(g_pruned_tree_us, extra=1, fallen.leaves=FALSE)
+```
+
+```{r}
+s_pruned_tree_us=prune(s_cv_tree_us, cp=s_best_cp_us)
+rpart.plot(s_pruned_tree_us, extra=1, fallen.leaves=FALSE)
+```
+
+*Use Tree to Predict on Unseen Data*
+We can keep the predicted class and probability for later use using the following code:
+```{r}
+ctrain <- ctrain %>%
+  select(-loan_amnt)
+chold <- chold 
+st.preds <- data.frame(
+    loan_default = chold$loan_default,
+    
+    im.g.prob = predict(
+      gini_tree,
+                                     chold,
+                                     type ="prob"
+                                     )[,"Yes"], #probability of "Yes"
+    im.s.prob = predict(
+      S_tree,
+                                     chold,
+                                     type ="prob"
+                                     )[,"Yes"],
+    us.gini.prob = predict(
+      gini_tree_us,
+                                     chold,
+                                     type ="prob"
+                                     )[,"Yes"], #probability of "Yes"
+
+    us.entropy.prob = predict(
+      S_tree_us,
+                                     chold,
+                                     type ="prob"
+                                     )[,"Yes"], #probability of "Yes"
+
+    g.cv.pruned.prob = predict(
+      g_pruned_tree_us,
+                                     chold,
+                                     type ="prob"
+                                     )[,"Yes"], #probability of "Yes"
+
+    s.cv.pruned.prob = predict(
+      s_pruned_tree_us,
+                                     chold,
+                                     type ="prob"
+                                     )[,"Yes"] #probability of "Yes"
+)
+```
+
+```{r}
+# # Create prediction objects
+# # pred.im.log  <- prediction(st.preds$im.g.prob,  st.preds$loan_default)
+# # pred.bal.log <- prediction(st.preds$im.s.prob, st.preds$loan_default)
+# pred.im.log   <- prediction(st.preds$us.gini.prob,   st.preds$loan_default)
+# pred.bal.log  <- prediction(st.preds$us.entropy.prob,  st.preds$loan_default)
+# pred.im.rf   <- prediction(st.preds$g.cv.pruned.prob,   st.preds$loan_default)
+# pred.bal.rf  <- prediction(st.preds$s.cv.pruned.prob,  st.preds$loan_default)
+# 
+# # ROC curve performance objects
+# perf.nn_logistic    <- performance(pred.im.log,  "tpr", "fpr")
+# perf.nn_logistic_us <- performance(pred.bal.log, "tpr", "fpr")
+# perf.nn_rf          <- performance(pred.im.rf,   "tpr", "fpr")
+# perf.nn_rf_us       <- performance(pred.bal.rf,  "tpr", "fpr")
+# perf.nn_rf          <- performance(pred.im.rf,   "tpr", "fpr")
+# perf.nn_rf_us       <- performance(pred.bal.rf,  "tpr", "fpr")
+# 
+# # AUC objects
+# auc.nn_logistic    <- performance(pred.im.log,  "auc")@y.values[[1]]
+# auc.nn_logistic_us <- performance(pred.bal.log, "auc")@y.values[[1]]
+# auc.nn_rf          <- performance(pred.im.rf,   "auc")@y.values[[1]]
+# auc.nn_rf_us       <- performance(pred.bal.rf,  "auc")@y.values[[1]]
+# auc.nn_rf          <- performance(pred.im.rf,   "auc")@y.values[[1]]
+# auc.nn_rf_us       <- performance(pred.bal.rf,  "auc")@y.values[[1]]
+# 
+```
+
+```{r}
+library(dplyr)
+library(MLmetrics)
+
+# =============================================================
+# 1. Helper function: compute F1 at a given threshold
+# =============================================================
+f1_for_threshold <- function(prob, actual, threshold) {
+  
+  preds <- ifelse(prob > threshold, "Yes", "No")
+  preds <- factor(preds, levels = c("Yes", "No"))
+  actual <- factor(actual, levels = c("Yes", "No"))
+  
+  MLmetrics::F1_Score(y_pred = preds,
+                      y_true = actual,
+                      positive = "Yes")
+}
+
+# =============================================================
+# 2. Create threshold grid
+# =============================================================
+thresholds <- seq(0.01, 0.99, by = 0.01)
+
+# =============================================================
+# 3. Compute F1 curves for all 6 models
+# =============================================================
+
+# Imbalanced Gini
+f1_curve_gini_im <- sapply(thresholds, function(t) {
+  f1_for_threshold(st.preds$im.g.prob,
+                   st.preds$loan_default, t)
+})
+
+# Imbalanced Entropy
+f1_curve_entropy_im <- sapply(thresholds, function(t) {
+  f1_for_threshold(st.preds$im.s.prob,
+                   st.preds$loan_default, t)
+})
+
+# Balanced Gini
+f1_curve_gini_us <- sapply(thresholds, function(t) {
+  f1_for_threshold(st.preds$us.gini.prob,
+                   st.preds$loan_default, t)
+})
+
+# Balanced Entropy
+f1_curve_entropy_us <- sapply(thresholds, function(t) {
+  f1_for_threshold(st.preds$us.entropy.prob,
+                   st.preds$loan_default, t)
+})
+
+# CV-pruned Gini
+f1_curve_gini_cv <- sapply(thresholds, function(t) {
+  f1_for_threshold(st.preds$g.cv.pruned.prob,
+                   st.preds$loan_default, t)
+})
+
+# CV-pruned Entropy
+f1_curve_entropy_cv <- sapply(thresholds, function(t) {
+  f1_for_threshold(st.preds$s.cv.pruned.prob,
+                   st.preds$loan_default, t)
+})
+
+
+# =============================================================
+# 4. Plot all F1 curves
+# =============================================================
+plot(thresholds, f1_curve_gini_im, type = "l", lwd = 2, col = "blue",
+     xlab = "Threshold", ylab = "F1 Score",
+     main = "F1 Score vs Threshold for All Tree Models")
+
+lines(thresholds, f1_curve_entropy_im,  col = "green",  lwd = 2)
+lines(thresholds, f1_curve_gini_us,     col = "red",    lwd = 2)
+lines(thresholds, f1_curve_entropy_us,  col = "gold",   lwd = 2)
+lines(thresholds, f1_curve_gini_cv,     col = "purple", lwd = 2)
+lines(thresholds, f1_curve_entropy_cv,  col = "orange", lwd = 2)
+
+legend("bottomright",
+       legend = c("Imbalanced Gini",
+                  "Imbalanced Entropy",
+                  "Balanced Gini",
+                  "Balanced Entropy",
+                  "CV-Pruned Gini",
+                  "CV-Pruned Entropy"),
+       col = c("blue", "green", "red", "gold", "purple", "orange"),
+       lwd = 2)
+
+
+# =============================================================
+# 5. Identify optimal thresholds for each model
+# =============================================================
+best_results <- data.frame(
+  Model = c("Imbalanced Gini",
+            "Imbalanced Entropy",
+            "Balanced Gini",
+            "Balanced Entropy",
+            "CV-Pruned Gini",
+            "CV-Pruned Entropy"),
+  
+  Best_Threshold = c(
+    thresholds[which.max(f1_curve_gini_im)],
+    thresholds[which.max(f1_curve_entropy_im)],
+    thresholds[which.max(f1_curve_gini_us)],
+    thresholds[which.max(f1_curve_entropy_us)],
+    thresholds[which.max(f1_curve_gini_cv)],
+    thresholds[which.max(f1_curve_entropy_cv)]
+  ),
+  
+  Best_F1 = c(
+    max(f1_curve_gini_im),
+    max(f1_curve_entropy_im),
+    max(f1_curve_gini_us),
+    max(f1_curve_entropy_us),
+    max(f1_curve_gini_cv),
+    max(f1_curve_entropy_cv)
+  )
+)
+
+# Print summary results
+print(best_results)
+
+```
+
+*Obtain Variable Importance*
+Variable importance measures how much each predictor contributes to the decision-making process in a decision tree model. In rpart variable importance is computed by summing the total improvement in node impurity (Gini index or entropy) across all splits where that variable is used, weighted by the number of observations for those nodes. The code below gives the variable importance for our pruned tree above.
+
+```{r}
+ print(g_pruned_tree_us$variable.importance)
+```
+
+```{r}
+ print(s_pruned_tree_us$variable.importance)
+```
+
+Higher importance values indicate greater influence on the model's predictions. The five most important variables for our pruned tree were found to be sub_grade_score, debt_settlement_flag, installment_to_loanamnt, term, and fico score. 
+
+# Comparing Performance of the Decision Trees
+
+
+**ROC Curves**
+```{r}
+# # ============================================================
+# # 1. Create ROCR prediction objects from your data frame
+# # ============================================================
+# # ----- Imbalanced Trees -----
+# gini_pred_im <- ROCR::prediction(single.tree.preds$im.g.prob,
+#                                  single.tree.preds$Actual_Class)
+# gini_roc_im  <- ROCR::performance(gini_pred_im, "tpr", "fpr")
+# 
+# entropy_pred_im <- ROCR::prediction(single.tree.preds$im.s.prob,
+#                                     single.tree.preds$Actual_Class)
+# entropy_roc_im  <- ROCR::performance(entropy_pred_im, "tpr", "fpr")
+# 
+# # ----- Balanced (US) Trees -----
+# gini_pred_us <- ROCR::prediction(single.tree.preds$us.gini.prob,
+#                                  single.tree.preds$Actual_Class)
+# gini_roc_us  <- ROCR::performance(gini_pred_us, "tpr", "fpr")
+# 
+# entropy_pred_us <- ROCR::prediction(single.tree.preds$us.entropy.prob,
+#                                     single.tree.preds$Actual_Class)
+# entropy_roc_us  <- ROCR::performance(entropy_pred_us, "tpr", "fpr")
+# 
+# # ----- Cross-Validated Pruned Trees -----
+# gini_pred_cv <- ROCR::prediction(single.tree.preds$g.cv.pruned.prob,
+#                                  single.tree.preds$Actual_Class)
+# gini_roc_cv  <- ROCR::performance(gini_pred_cv, "tpr", "fpr")
+# 
+# entropy_pred_cv <- ROCR::prediction(single.tree.preds$s.cv.pruned.prob,
+#                                     single.tree.preds$Actual_Class)
+# entropy_roc_cv  <- ROCR::performance(entropy_pred_cv, "tpr", "fpr")
+# 
+# # ============================================================
+# # 2. Plot all ROC curves
+# # ============================================================
+# 
+# plot(gini_roc_im, col = "blue", lwd = 2,
+#      main = "ROC Curves for All Tree Models")
+# 
+# plot(entropy_roc_im, col = "green",  lwd = 2, add = TRUE)
+# plot(gini_roc_cv,   col = "violet", lwd = 2, add = TRUE)
+# 
+# plot(gini_roc_us,   col = "red",   lwd = 2, add = TRUE)
+# plot(entropy_roc_us,col = "gold",  lwd = 2, add = TRUE)
+# plot(entropy_roc_cv,col = "orange",lwd = 2, add = TRUE)
+# 
+# # Reference line
+# abline(a = 0, b = 1, col = "black", lty = 2, lwd = 2)
+# 
+# # Legend
+# legend("bottomright",
+#        legend = c("Imbal Gini",
+#                   "Imbal Entropy",
+#                   "CV Pruned Gini",
+#                   "Bal Gini",
+#                   "Bal Entropy",
+#                   "CV Pruned Entropy"),
+#        col = c("blue", "green", "violet", "red", "gold", "orange"),
+#        lwd = 2)
+```
+```{r}
+# # Compute AUC values
+# gini_auc_im      <- ROCR::performance(gini_pred_im, "auc")@y.values[[1]]
+# entropy_auc_im   <- ROCR::performance(entropy_pred_im, "auc")@y.values[[1]]
+# gini_auc_cv      <- ROCR::performance(gini_pred_cv, "auc")@y.values[[1]]
+# 
+# gini_auc_us      <- ROCR::performance(gini_pred_us, "auc")@y.values[[1]]
+# entropy_auc_us   <- ROCR::performance(entropy_pred_us, "auc")@y.values[[1]]
+# entropy_auc_cv   <- ROCR::performance(entropy_pred_cv, "auc")@y.values[[1]]
+# 
+# cat("Imbalanced AUCs:\n")
+# cat("  Gini:    ", round(gini_auc_im, 4), "\n")
+# cat("  Entropy: ", round(entropy_auc_im, 4), "\n")
+# cat("  CV Gini: ", round(gini_auc_cv, 4), "\n\n")
+# 
+# cat("Balanced AUCs:\n")
+# cat("  Gini:    ", round(gini_auc_us, 4), "\n")
+# cat("  Entropy: ", round(entropy_auc_us, 4), "\n")
+# cat("  CV Entropy:", round(entropy_auc_cv, 4), "\n")
+```
+
+The AUC differs a little from model to model, but it seems that the entropy balanced decision tree had the optimal AUC value. 
+
+# Conclusion
+
+The best decision tree was found to be that with the highest AUC. This would be the decision tree trained on entropy impurity measure. We have saved this tree below.
+
+```{r}
+# Save predicted values
+saveRDS(single.tree.preds, "st.preds_clean_4.rds")
+```
+
+

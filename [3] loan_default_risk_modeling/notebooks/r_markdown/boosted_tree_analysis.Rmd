@@ -1,0 +1,413 @@
+---
+title: "Part 2 - Tree 3 - XGBoost"
+author: "Project Repository"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    number_sections: yes
+    theme: readable
+    toc: yes
+    toc_float: yes
+    code_download: yes
+  word_document:
+    toc: no
+---
+
+```{r setup, include=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE,warning=FALSE)
+knitr::opts_chunk$set(fig.width=6, fig.height=4)
+
+if(require(pacman)==0)
+   {install.packages("pacman")}
+pacman::p_load(devtools,caret,cluster,dplyr,fastDummies,leaps,pacman,tidyverse,skimr,fastDummies,GGally,DataExplorer,ggrepel,ggthemes,dslabs,lubridate,janitor,e1071,scales,recipes,magrittr,forcats,tidycensus,zipcodeR,tidygeocoder,tigris,sf, purrr,ROCR,rpart,rpart.plot, doParallel)
+
+if (!require(mlba)) {
+  library(devtools)
+  install_github("gedeck/mlba/mlba", force=TRUE)
+}
+pacman::p_load(mlba,tidyverse)
+```
+
+**Background**
+*Boosting*
+*Another ensemble decision tree is to use a boosted algorithm. Boosting is a machine learning technique that improves prediction accuracy by training multiple weak models (usually decision trees) sequentially, where each tree learns from the mistakes of the previous one. Unlike Random Forests (which train many independent trees and average their outputs), Boosting builds trees one at a time, with each new tree focusing on correcting the errors of the previous ones.
+*Learning from Mistakes, the Boosted Way*
+- Train a weak model (First Decision Tree)
+  - Start with a training a small decision tree on the dataset
+  - Some predictions will be incorrect 
+- Increase focus on mistakes
+  - Increase weight of misclassified points (make them more important)
+  - Next tree pays extra attention to mistakes
+- Build many trees
+  - Repeat 
+  - Consecutive trees correct each other
+- Final prediction = a combination of all trees' predictions, adjusted based on their contribution to reducing errors
+  - Higher contributing trees reduce errors and greater influence oin final prediction
+  - Lower contributing trees have smaller impact, which ensures the ensemble is not dominated by any single tree's mistake
+  
+*Comparing Random Forest and Boosting Ensembles*
+
+| **Feature** | **Random Forest** | **Boosting** | 
+|-------------|-------------------|--------------|
+|Construction | Independtly       | Sequentially | 
+| Focus       | Majority voting (avg) | Mistake correcting
+| Tree Depth  | Full trees        | Shallow trees| 
+| Performancxe| Generalization.   | More accurate (slower) | 
+| Overfit Risk | Low.             | High        | 
+
+
+# Load and Survey Data
+**Loading in Data**
+*The 'train.csv' file was loaded in with the code below, this was named df_raw because it is 'raw' unstructured data. The argument stringAsFactors = TRUE converts character variables into factors. 
+```{r}
+train <- readRDS("3B_Project Team_train_raw.rds")
+hold <- readRDS("3B_Project Team_holdout_raw.rds")
+# train_clean <- readRDS("3B_Project Team_train_raw.rds")
+# hold_clean <- readRDS("3B_Project Team_holdout_raw.rds")
+# # train1 <- readRDS("train_clean_1.rds")
+# hold1 <- readRDS("hold_clean_1.rds")
+```
+
+**Boostig Algorithms**
+There are several boosting algorithms including:
+
+* AdaBoost: Adjusts sample weights so that misclassified instances get more attention.
+* Gradient Boosting (GBM, XGBoost, LightGBM, CatBoost): Uses gradient-based updates to correct previous errors.
+* LogitBoost: Adjusts predictions based on the log-odds transformation in classification tasks.
+
+We will consider **Gradient Boosting**. The `xgboost` package in R is a popular implementation of this algorithm.
+
+**Key XGBoost Parameters to Tune**
+
+| Parameter          | Description                                           | Example Values to Try    |
+|-------------------|---------------------------------------------------|----------------------|
+| **nrounds**       | Number of boosting rounds (trees)                 | 50, 100, 200, 500   |
+| **max_depth**     | Maximum depth of each tree                        | 3, 5, 7, 10         |
+| **eta**          | Learning rate (step size shrinkage)               | 0.01, 0.1, 0.3      |
+| **gamma**        | Minimum loss reduction required for a split       | 0, 0.1, 0.5, 1      |
+| **colsample_bytree** | Fraction of features to randomly sample per tree | 0.5, 0.7, 1.0       |
+| **min_child_weight** | Minimum sum of instance weights needed in a child node | 1, 3, 5            |
+| **subsample**    | Fraction of training data used per boosting round | 0.5, 0.7, 1.0       |
+
+**Core Detection**
+```{r}
+cores=parallel::detectCores()
+cores
+```
+**Fitting the Model**
+```{r}
+#STEP 1: Set Up Parallel Processing
+cl <- parallel::makeCluster(cores)  # Set CPU cores for parallel execution
+registerDoParallel(cl)  # Register parallel backend
+
+#STEP 2: Set Up 5-Fold Cross-Validation
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  allowParallel = TRUE  # Enables parallel computation during training
+)
+
+#STEP 3: Train XGBoost Model Using tuneLength (Automatic Hyperparameter Search)
+xgb <- train(
+  loan_default ~ ., 
+  data = train,
+  method = "xgbTree",
+  trControl = cv_control,  # Apply 5-fold cross-validation
+  tuneLength = 5  # caret picks up to 5 values for each of 7 parms and fits all combos up to 5^7
+)
+
+# Step 4: Stop Parallel Processing ----
+stopCluster(cl)  # Shut down parallel cluster
+registerDoSEQ()  # Reset to sequential processing
+
+saveRDS(xgb, "xgboost.rds")
+```
+
+```{r}
+#STEP 1: Set Up Parallel Processing
+cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+registerDoParallel(cl)  # Register parallel backend
+
+#STEP 2: Set Up 5-Fold Cross-Validation
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  allowParallel = TRUE  # Enables parallel computation during training
+)
+
+# STEP 3: Train AdaBoost Model
+# Note: This method uses the 'adabag' package
+ada <- train(
+  loan_default ~ ., 
+  data = train,
+  method = "AdaBoost.M1", # <-- Change the method here
+  trControl = cv_control, 
+  tuneLength = 5
+)
+
+# Step 4: Stop Parallel Processing ----
+stopCluster(cl)  # Shut down parallel cluster
+registerDoSEQ()  # Reset to sequential processing
+
+saveRDS(ada, "adab.rds")
+```
+
+```{r}
+#STEP 1: Set Up Parallel Processing
+cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+registerDoParallel(cl)  # Register parallel backend
+
+#STEP 2: Set Up 5-Fold Cross-Validation
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  allowParallel = TRUE  # Enables parallel computation during training
+)
+
+# STEP 3: Train LogitBoost Model
+# Note: This method uses the 'caTools' package
+log <- train(
+  loan_default ~ ., 
+  data = train,
+  method = "LogitBoost", # <-- Change the method here
+  trControl = cv_control, 
+  tuneLength = 5
+)
+
+# Step 4: Stop Parallel Processing ----
+stopCluster(cl)  # Shut down parallel cluster
+registerDoSEQ()  # Reset to sequential processing
+
+saveRDS(log, "logb.rds")
+```
+
+```{r}
+set.seed(123)
+maj <- train %>% dplyr::filter(loan_default == "No")
+min <- train %>% dplyr::filter(loan_default == "Yes")
+maj_under <- maj %>% dplyr::sample_n(nrow(min))
+train_us <- dplyr::bind_rows(min, maj_under) %>% dplyr::slice_sample(prop = 1)
+prop.table(table(train_us$loan_default))
+
+# cmaj <- train_clean %>% dplyr::filter(loan_default == "No")
+# cmin <- train_clean %>% dplyr::filter(loan_default == "Yes")
+# cmaj_under <- cmaj %>% dplyr::sample_n(nrow(cmin))
+# ctrain_us <- dplyr::bind_rows(cmin, cmaj_under) %>% dplyr::slice_sample(prop = 1)
+# prop.table(table(ctrain_us$loan_default))
+
+# maj1 <- train1 %>% dplyr::filter(loan_default == "No")
+# min1 <- train1 %>% dplyr::filter(loan_default == "Yes")
+# maj_under1 <- maj1 %>% dplyr::sample_n(nrow(min1))
+# train_us1 <- dplyr::bind_rows(min1, maj_under1) %>% dplyr::slice_sample(prop = 1)
+# prop.table(table(train_us1$loan_default))
+```
+
+```{r}
+#STEP 1: Set Up Parallel Processing
+cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+registerDoParallel(cl)  # Register parallel backend
+
+#STEP 2: Set Up 5-Fold Cross-Validation
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  allowParallel = TRUE  # Enables parallel computation during training
+)
+
+#STEP 3: Train XGBoost Model Using tuneLength (Automatic Hyperparameter Search)
+xgb_us <- train(
+  loan_default ~ ., 
+  data = train_us,
+  method = "xgbTree",
+  trControl = cv_control,  # Apply 5-fold cross-validation
+  tuneLength = 5  # caret picks up to 5 values for each of 7 parms and fits all combos up to 5^7
+)
+
+# Step 4: Stop Parallel Processing ----
+stopCluster(cl)  # Shut down parallel cluster
+registerDoSEQ()  # Reset to sequential processing
+
+saveRDS(xgb_us, "xgb_us.rds")
+```
+
+```{r}
+#STEP 1: Set Up Parallel Processing
+cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+registerDoParallel(cl)  # Register parallel backend
+
+#STEP 2: Set Up 5-Fold Cross-Validation
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  allowParallel = TRUE  # Enables parallel computation during training
+)
+
+# STEP 3: Train AdaBoost Model
+# Note: This method uses the 'adabag' package
+ada_us <- train(
+  loan_default ~ ., 
+  data = train_us,
+  method = "AdaBoost.M1", # <-- Change the method here
+  trControl = cv_control, 
+  tuneLength = 5
+)
+
+# Step 4: Stop Parallel Processing ----
+stopCluster(cl)  # Shut down parallel cluster
+registerDoSEQ()  # Reset to sequential processing
+
+saveRDS(ada_us, "adab_us.rds")
+```
+
+```{r}
+#STEP 1: Set Up Parallel Processing
+cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+registerDoParallel(cl)  # Register parallel backend
+
+#STEP 2: Set Up 5-Fold Cross-Validation
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  allowParallel = TRUE  # Enables parallel computation during training
+)
+
+# STEP 3: Train LogitBoost Model
+# Note: This method uses the 'caTools' package
+log_us <- train(
+  loan_default ~ ., 
+  data = train,
+  method = "LogitBoost", # <-- Change the method here
+  trControl = cv_control, 
+  tuneLength = 5
+)
+
+# Step 4: Stop Parallel Processing ----
+stopCluster(cl)  # Shut down parallel cluster
+registerDoSEQ()  # Reset to sequential processing
+
+saveRDS(log_us, "logb_us.rds")
+```
+
+**Evaluatig the Results**
+*View Output*
+```{r}
+#print(xgb_model)  #  To Display all tuning combinations
+print(xgb$bestTune)  # Display the best tuning combination
+```
+
+```{r}
+#print(xgb_model)  #  To Display all tuning combinations
+print(ada$bestTune)  # Display the best tuning combination
+```
+
+```{r}
+#print(xgb_model)  #  To Display all tuning combinations
+print(log$bestTune)  # Display the best tuning combination
+```
+
+```{r}
+#print(xgb_model)  #  To Display all tuning combinations
+print(xgb_us$bestTune)  # Display the best tuning combination
+```
+
+```{r}
+#print(xgb_model)  #  To Display all tuning combinations
+print(ada_us$bestTune)  # Display the best tuning combination
+```
+
+```{r}
+#print(xgb_model)  #  To Display all tuning combinations
+print(log_us$bestTune)  # Display the best tuning combination
+```
+*Make predictions*
+```{r}
+boost.preds <- data.frame(
+  loan_default = hold$loan_default,
+  im.xgb.class = predict(xgb, 
+                                 newdata = hold,
+                                 type="raw"),
+  im.xgb.prob = predict(xgb, 
+                                 newdata = hold, 
+                                 type="prob")[,"Yes"],
+  im.ada.class = predict(ada, 
+                                 newdata = hold,
+                                 type="raw"),
+  im.ada.prob = predict(ada, 
+                                 newdata = hold, 
+                                 type="prob")[,"Yes"],
+  im.log.class = predict(log, 
+                                 newdata = hold,
+                                 type="raw"),
+  im.log.prob = predict(log, 
+                                 newdata = hold, 
+                                 type="prob")[,"Yes"],
+  bal.xgb.class = predict(xgb_us, 
+                                 newdata = hold,
+                                 type="raw"),
+  bal.xgb.prob = predict(xgb_us, 
+                                 newdata = hold, 
+                                 type="prob")[,"Yes"],
+  bal.ada.class = predict(ada_us, 
+                                 newdata = hold,
+                                 type="raw"),
+  bal.ada.prob = predict(ada_us, 
+                                 newdata = hold, 
+                                 type="prob")[,"Yes"],
+  bal.log.class = predict(log_us, 
+                                 newdata = hold,
+                                 type="raw"),
+  bal.log.prob = predict(log_usz, 
+                                 newdata = hold, 
+                                 type="prob")[,"Yes"]
+)
+```
+
+**Comparing Models**
+```{r}
+# Extract true labels
+truth <- boost.preds$loan_default
+
+# Get model names based on .prob columns
+model_names <- names(pred.holdout) %>%
+  stringr::str_subset("\\.prob$") %>%
+  stringr::str_remove("\\.prob$")
+
+# Function to compute metrics for each model
+get_metrics <- function(model_name) {
+  prob_col <- paste0(model_name, ".prob")
+  class_col <- paste0(model_name, ".class")
+
+  # Extract predictions
+  prob <- pred.holdout[[prob_col]]
+  pred <- factor(pred.holdout[[class_col]], levels = c("No", "Yes"))
+
+  # Confusion matrix
+  cm <- caret::confusionMatrix(pred, truth, positive = "Yes")
+
+  # AUC
+  roc_obj <- pROC::roc(truth, prob, quiet = TRUE)
+
+  # Metrics
+  data.frame(
+    Model = model_name,
+    Accuracy = cm$overall["Accuracy"],
+    Sensitivity = cm$byClass["Sensitivity"],
+    Specificity = cm$byClass["Specificity"],
+    F1 = MLmetrics::F1_Score(
+      y_pred = pred,
+      y_true = truth,
+      positive = "Yes"
+    ),
+    AUC = as.numeric(roc_obj$auc)
+  )
+}
+
+# Apply to all models
+results_df <- dplyr::bind_rows(lapply(model_names, get_metrics))
+
+# Remove row names and display
+rownames(results_df) <- NULL
+print(results_df)
+```
+

@@ -1,0 +1,707 @@
+---
+title: "Part 2 - Tree 2 - Random Forest"
+author: "Project Repository"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    number_sections: yes
+    theme: readable
+    toc: yes
+    toc_float: yes
+    code_download: yes
+  word_document:
+    toc: no
+---
+
+```{r setup, include=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE,warning=FALSE)
+knitr::opts_chunk$set(fig.width=6, fig.height=4)
+
+if(require(pacman)==0)
+   {install.packages("pacman")}
+pacman::p_load(devtools,caret,cluster,dplyr,fastDummies,leaps,pacman,tidyverse,skimr,fastDummies,GGally,DataExplorer,ggrepel,ggthemes,dslabs,lubridate,janitor,e1071,scales,recipes,magrittr,forcats,tidycensus,zipcodeR,tidygeocoder,tigris,sf, purrr,ROCR,rpart,rpart.plot, doParallel)
+
+if (!require(mlba)) {
+  library(devtools)
+  install_github("gedeck/mlba/mlba", force=TRUE)
+}
+pacman::p_load(mlba,tidyverse)
+```
+
+# Introduction
+**Background**
+*Ensemble Methods*
+Decision trees are considered to be weak classifiers. That means they do not do such a great job in many cases. Because these trees are
+- Prone to overfitting
+- Sensitive to training data
+= Have their predictions with high variance
+
+One way to improve decision tree performance is to use ensemble methods. Here, you fit several diferent trees, then average (for regression) or majority vote (for classification) of the predictions of all the trees. This can help reduce the model's variance and improve overall predictive performance.
+
+The two most common methods of ensembling decision trees are 
+1. Random Forest: Average predictions from many independently grown trees
+2. Boosting: Building trees sequentially, where each new tree focuses on correcting the errors of the previous trees. 
+
+Ensemble models have the same average error of prediction as the individual models. The variance for ensemble models is often lower than the varainace or the individual models. The lower the covariance between the predictions, the lower the variance of the ensembled predictions. 
+
+*Random Forests*
+A random forest is simply a collection of decision trees that work together to make predictions. Instead of relying on just one tree, we train many trees on different random subsets of data. Then, we average their predictions (for regression) or take a majority vote (for classification). This process reduces overfitting, improving prediciton accuracy and precision. 
+
+A random forest builds multiple decision tree using a technique called bagging (Bootstrap Aggregating):
+- Bootstrap Sampling (Random Subsets): Rather than using the entire dataset, each tree is trained on a random sample of the data. The sample is taken with replacement meaning some data may be used multipl times, which creates a diverse set of trees.
+- Random Feature Selection: At each split in the tree, only a random subset of features is considered instead of using all variables, which creates even more diversity in the predictions
+- Voting/Averaging for Predictions: For classification problems, each tree votes on the outcome for each observation, and the majority wins. For regression problems, the final prediction is the average of all tree predictions. 
+
+*Random Forests in R*
+Below is a commented out example of code we combine later to build our random forest model.
+```{r}
+# rf <- randomForest::randomForest(loan_default ~ ., 
+#                    data=train, 
+#                    ntree=500, 
+#                    mtry=4, 
+#                    nodesize=5, 
+#                    importance=TRUE
+#                    )
+```
+In this code block above, we use the randomForest package to fit a random forest model. 
+- loan_default ~ .: Model predicts loan default using all other variables.
+- data = train: The training dataset used to fit the model
+- ntree = 500: The number of trees in the forest. Higher values improves accuracy/precision, but increase computational time
+- mtry = 4: The number of features to consider at each split. In this case, 4 features are randomly selected at each split. For classification models, the default is equal to the square root of the number of predictors. While, for regression, the default is the number of predictors divided by 3. 
+- nodesoze = 5: The minimum size of terminal nodes, smaller values increase the model complexity.
+- importance = TRUE: Calculate variable importance.
+
+Too summarize (we will do this with our final code) this code:
+- Trains a Random Forest classifier with 500 trees. 
+- Randomly selects 4 features at each split increase the diversity among the trees
+- Ensures the nodes have at least 5 observations
+- Calculates the importance of each feature
+
+# Load and Survey Data
+**Loading in Data**
+*The 'train.csv' file was loaded in with the code below, this was named df_raw because it is 'raw' unstructured data. The argument stringAsFactors = TRUE converts character variables into factors. 
+```{r}
+train1 <- readRDS("3B_Project Team_train_raw.rds") 
+hold1 <- readRDS("3B_Project Team_holdout_raw.rds")
+# train1 <- readRDS("train_clean_1.rds")
+# hold1 <- readRDS("hold_clean_1.rds")
+train2 <- readRDS("train_clean_2.rds")
+hold2 <- readRDS("hold_clean_2.rds")
+```
+
+**Detect Cores in Current Computer**
+```{r}
+cores=parallel::detectCores()
+cores
+```
+
+**Load Models (if applicable)**
+*If already ran models, load rds files here. 
+```{r}
+# rf1 <- readRDS("rf_clean1.rds")
+# rf1_us <- readRDS("rf_us_clean1.rds")
+# rf2 <- readRDS("rf_clean2.rds")
+# rf2_us <- readRDS("rf_us_clean2.rds")
+```
+
+# Random Forest Models Trained on Imbalanced Dataset
+## No CV
+**Fit Model**
+Here, we train a model without cross-validation to fit a random forest ensemble. 
+
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# rf1 <- randomForest::randomForest(loan_default ~ .,
+#                    data=train1,
+#                    ntree=30,
+#                    mtry=10,
+#                    nodesize=5,
+#                    importance=TRUE
+#                    )
+# 
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# saveRDS(rf1, "rf_clean_1.rds")
+```
+
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# rf2 <- randomForest::randomForest(loan_default ~ .,
+#                    data=train2,
+#                    ntree=30,
+#                    mtry=10,
+#                    nodesize=5,
+#                    importance=TRUE,
+#                    )
+# 
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# saveRDS(rf2, "rf_clean_2.rds")
+```
+
+Here, we are training a random forest model using parallel processing. We have already described this model above as commented out code. 
+
+**View A Summary**
+*how to view summary of rf given specified number (#). 
+```{r}
+# rf#
+```
+
+## Yes CV
+**Fit Model**
+Here, we train a random forest model using cross validation and parallel processing. 
+
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# # Set up trainControl
+# cv_control <- trainControl(method = "cv", number = 5)
+# 
+# # Define a grid of `mtry` values to search over
+# mtry_grid <- expand.grid(mtry = seq(1, ncol(train) - 1, by = 1))
+# 
+# # Train the Random Forest model with cross-validation
+# rf1_cv <- train(loan_default ~ .,
+#                   data = train1,
+#                   method = "rf",  # Uses randomForest under the hood
+#                   trControl = cv_control,  # Apply 5-fold CV
+#                   tuneGrid = mtry_grid,  # Search over `mtry`
+#                   ntree = 30,  # Fixed number of trees
+#                   importance = TRUE,
+#                   nodesize = 5)
+# 
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# 
+# #save it
+# saveRDS(rf1_cv, "rf_cv_clean_1.rds")
+```
+
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# # Set up trainControl
+# cv_control <- trainControl(method = "cv", number = 5)
+# 
+# # Define a grid of `mtry` values to search over
+# cmtry_grid <- expand.grid(mtry = seq(1, ncol(train_clean) - 1, by = 1))
+# 
+# # Train the Random Forest model with cross-validation
+# rf2_cv <- train(loan_default ~ .,
+#                   data = train2,
+#                   method = "rf",  # Uses randomForest under the hood
+#                   trControl = cv_control,  # Apply 5-fold CV
+#                   tuneGrid = cmtry_grid,  # Search over `mtry`
+#                   ntree = 30,  # Fixed number of trees
+#                   importance = TRUE,
+#                   nodesize = 5)
+# 
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# 
+# #save it
+# saveRDS(rf2_cv, "rf_cv_clean_2.rds")
+```
+
+# Random Forest Moels Trained on Balanced Dataset
+> We first need to undersample the majority class in order to get a 50/50 ratio of Yes and No for loan default. 
+
+Here, we undersample the data, such the the number for each class is equivalent.
+```{r}
+# set.seed(101)
+# maj1 <- train1 %>% dplyr::filter(loan_default == "No")
+# min1 <- train1 %>% dplyr::filter(loan_default == "Yes")
+# maj_under1 <- maj1 %>% dplyr::sample_n(nrow(min1))
+# train_us1 <- dplyr::bind_rows(min1, maj_under1) %>% dplyr::slice_sample(prop = 1)
+# prop.table(table(train_us1$loan_default))
+```
+
+```{r}
+set.seed(101)
+us <- function(data, target_col, minority_level) {
+  
+  # 1. Capture the target variable name as a symbol for dplyr functions
+  target_sym <- rlang::sym(target_col)
+  
+  # 2. Separate the classes (Majority and Minority)
+  min_data <- data %>% 
+    dplyr::filter(!!target_sym == minority_level)
+  
+  maj_data <- data %>% 
+    dplyr::filter(!!target_sym != minority_level)
+  
+  # 3. Undersample the Majority class to match the size of the Minority class
+  #    The number of rows to sample is the size of the minority class
+  maj_under <- maj_data %>% 
+    dplyr::sample_n(size = nrow(min_data))
+  
+  # 4. Combine the balanced classes and randomly shuffle the rows
+  balanced_data <- dplyr::bind_rows(min_data, maj_under) %>% 
+    dplyr::slice_sample(prop = 1) # Shuffles the rows randomly
+
+  return(balanced_data)
+}
+
+train1_us <- us(
+  data = train1,
+  target_col = "loan_default",
+  minority_level = "Yes"
+)
+
+train2_us <- us(
+  data = train2,
+  target_col = "loan_default",
+  minority_level = "Yes"
+)
+
+```
+
+
+## No CV
+**Fit Model**
+Here, we are training a random forest model on an undersampled training dataset without cross-validation. 
+
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# rf1_us <- randomForest::randomForest(loan_default ~ .,
+#                    data=train1_us,
+#                    ntree=30,
+#                    mtry=10,
+#                    nodesize=5,
+#                    importance=TRUE
+#                    )
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# saveRDS(rf1_us, "rf_us_clean_1.rds")
+```
+
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# rf2_us <- randomForest::randomForest(loan_default ~ .,
+#                    data=train2_us,
+#                    ntree=30,
+#                    mtry=10,
+#                    nodesize=5,
+#                    importance=TRUE
+#                    )
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# saveRDS(rf2_us, "rf_us_clean_2.rds")
+```
+
+## Yes CV
+**Fit Model**
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# # Set up trainControl
+# cv_control <- trainControl(method = "cv", number = 5)
+# 
+# # Define a grid of `mtry` values to search over
+# mtry_grid_us <- expand.grid(mtry = seq(1, ncol(train1_us) - 1, by = 1))
+# 
+# # Train the Random Forest model with cross-validation
+# rf1_cv_us <- train(loan_default ~ .,
+#                   data = train1_us,
+#                   method = "rf",  # Uses randomForest under the hood
+#                   trControl = cv_control,  # Apply 5-fold CV
+#                   tuneGrid = mtry_grid_us,  # Search over `mtry`
+#                   ntree = 30,  # Fixed number of trees
+#                   importance = TRUE,
+#                   nodesize = 5)
+# 
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# 
+# #save object
+# 
+# saveRDS(rf1_cv_us, "rf_cv_us_clean_1.rds")
+```
+
+```{r}
+# # Here we are using cores-1, but you can adjust this based on your machine
+# cl <- parallel::makeCluster(10)  # Set CPU cores for parallel execution
+# registerDoParallel(cl)  # Register parallel backend
+# 
+# # Set up trainControl
+# cv_control <- trainControl(method = "cv", number = 5)
+# 
+# # Define a grid of `mtry` values to search over
+# mtry_grid_us <- expand.grid(mtry = seq(1, ncol(train2_us) - 1, by = 1))
+# 
+# # Train the Random Forest model with cross-validation
+# rf2_cv_us <- train(loan_default ~ .,
+#                   data = train2_us,
+#                   method = "rf",  # Uses randomForest under the hood
+#                   trControl = cv_control,  # Apply 5-fold CV
+#                   tuneGrid = mtry_grid_us,  # Search over `mtry`
+#                   ntree = 30,  # Fixed number of trees
+#                   importance = TRUE,
+#                   nodesize = 5)
+# 
+# # Step 4: Stop Parallel Processing ----
+# stopCluster(cl)  # Shut down parallel cluster
+# registerDoSEQ()  # Reset to sequential processing
+# 
+# #save object
+# 
+# saveRDS(rf2_cv_us, "rf_cv_us_clean_2.rds")
+```
+
+```{r}
+# readRDS files 
+rf1<- readRDS("rf_clean_0.rds")
+rf2<- readRDS("rf_clean_2.rds")
+rf1_cv<- readRDS("rf_cv_clean_0.rds")
+rf2_cv<- readRDS("rf_cv_clean_2.rds")
+rf1_us<- readRDS("rf_us_clean_0.rds")
+rf2_us <- readRDS("rf_us_clean_2.rds")
+rf1_cv_us <- readRDS("rf_cv_us_clean_0.rds")
+rf2_cv_us <- readRDS("rf_cv_us_clean_2.rds")
+```
+
+**Predict on Holdout(Probability)**
+```{r}
+rf1.preds <- data.frame(
+  loan_default = hold1$loan_default,
+
+  # Imbalanced RF (no CV)
+  im.prob  = predict(rf1, 
+                     newdata=hold1, 
+                     type = "prob")[,"Yes"],
+
+  # Imbalanced RF (with CV)
+  im.cv.prob  = predict(rf1_cv, 
+                        newdata=hold1, 
+                        type = "prob")[,"Yes"],
+
+  # Balanced RF (no CV)
+  bal.prob  = predict(rf1_us, 
+                      newdata=hold1, 
+                      type = "prob")[,"Yes"],
+
+  # Balanced RF (with CV)
+  bal.cv.prob  = predict(rf1_cv_us, 
+                         newdata=hold1, 
+                         type = "prob")[,"Yes"]
+)
+
+rf2.preds <- data.frame(
+  loan_default = hold2$loan_default,
+  
+  im.prob =  predict(rf2,
+                     newdata=hold2, 
+                     type="prob")[,"Yes"], 
+  
+  im.cv.prob = predict(rf2_cv,
+                       newdata=hold2,
+                       type="prob")[,"Yes"],
+  
+  bal.prob = predict(rf2_us,
+                     newdata=hold2,
+                     type="prob")[,"Yes"],
+  
+  bal.cv.prob = predict(rf2_cv_us,
+                        newdata=hold2,
+                        type="prob")[,"Yes"]
+  )
+```
+
+```{r}
+library(MLmetrics)
+library(dplyr)
+
+# =============================================================
+# Helper function: compute F1 for a given threshold
+# =============================================================
+f1_for_threshold <- function(prob, actual, t) {
+  preds <- ifelse(prob > t, "Yes", "No")
+  preds <- factor(preds, levels = c("Yes","No"))
+  actual <- factor(actual, levels = c("Yes","No"))
+  MLmetrics::F1_Score(y_pred = preds, y_true = actual, positive = "Yes")
+}
+
+# Threshold search grid
+thresholds <- seq(0.01, 0.99, by = 0.01)
+
+# =============================================================
+# Compute F1 curves for all RF models
+# =============================================================
+
+f1_im      <- sapply(thresholds, function(t) f1_for_threshold(rf2.preds$im.prob,      rf2.preds$loan_default, t))
+f1_im_cv   <- sapply(thresholds, function(t) f1_for_threshold(rf2.preds$im.cv.prob,   rf2.preds$loan_default, t))
+f1_bal     <- sapply(thresholds, function(t) f1_for_threshold(rf2.preds$bal.prob,     rf2.preds$loan_default, t))
+f1_bal_cv  <- sapply(thresholds, function(t) f1_for_threshold(rf2.preds$bal.cv.prob,  rf2.preds$loan_default, t))
+
+# =============================================================
+# Plot all F1 curves
+# =============================================================
+plot(thresholds, f1_im, type="l", lwd=2, col="red",
+     xlab="Threshold", ylab="F1 Score",
+     main="F1 vs Threshold for Random Forest Models")
+
+lines(thresholds, f1_im_cv,  col="blue",  lwd=2)
+lines(thresholds, f1_bal,    col="green", lwd=2)
+lines(thresholds, f1_bal_cv, col="gold",  lwd=2)
+
+legend("bottomright",
+       legend = c("Imbalanced RF", "Imbalanced RF (CV)",
+                  "Balanced RF", "Balanced RF (CV)"),
+       col = c("red", "blue", "green", "gold"),
+       lwd = 2)
+
+# =============================================================
+# Compute optimal thresholds + best F1
+# =============================================================
+best_results_rf <- data.frame(
+  Model = c("Imbalanced RF",
+            "Imbalanced RF CV",
+            "Balanced RF",
+            "Balanced RF CV"),
+
+  Best_Threshold = c(
+    thresholds[which.max(f1_im)],
+    thresholds[which.max(f1_im_cv)],
+    thresholds[which.max(f1_bal)],
+    thresholds[which.max(f1_bal_cv)]
+  ),
+
+  Best_F1 = c(
+    max(f1_im),
+    max(f1_im_cv),
+    max(f1_bal),
+    max(f1_bal_cv)
+  )
+)
+
+print(best_results_rf)
+```
+```{r}
+pred.im.log  <- prediction(rf2.preds$im.prob,      rf2.preds$loan_default)
+pred.bal.log <- prediction(rf2.preds$im.cv.prob,   rf2.preds$loan_default)
+pred.im.rf   <- prediction(rf2.preds$bal.prob,     rf2.preds$loan_default)
+pred.bal.rf  <- prediction(rf2.preds$bal.cv.prob,  rf2.preds$loan_default)
+
+# ROC curve performance objects
+perf.nn_logistic    <- performance(pred.im.log,  "tpr", "fpr")
+perf.nn_logistic_us <- performance(pred.bal.log, "tpr", "fpr")
+perf.nn_rf          <- performance(pred.im.rf,   "tpr", "fpr")
+perf.nn_rf_us       <- performance(pred.bal.rf,  "tpr", "fpr")
+
+# AUC objects
+auc.nn_logistic    <- performance(pred.im.log,  "auc")@y.values[[1]]
+auc.nn_logistic_us <- performance(pred.bal.log, "auc")@y.values[[1]]
+auc.nn_rf          <- performance(pred.im.rf,   "auc")@y.values[[1]]
+auc.nn_rf_us       <- performance(pred.bal.rf,  "auc")@y.values[[1]]
+```
+
+```{r}
+plot(perf.nn_logistic, col="red", lwd=2, main="ROC Curves")
+plot(perf.nn_rf, col="green", lwd=2, add=TRUE)
+plot(perf.nn_logistic_us, col="blue", lwd=2, add=TRUE)
+plot(perf.nn_rf_us, col="violet", lwd=2, add=TRUE)
+abline(a=0, b=1, col="gray", lty=2)
+legend("bottomright", 
+       legend = c(
+         paste0("NN-Logistic (AUC=", round(auc.nn_logistic, 3), ")"),
+         paste0("NN-Logistic-US (AUC=", round(auc.nn_logistic_us, 3), ")"),
+         paste0("NN-RF (AUC=", round(auc.nn_rf, 3), ")"),
+         paste0("NN-RF-US (AUC=", round(auc.nn_rf_us, 3), ")")
+       ),
+       col = c("red", "green", "blue", "violet"), 
+       lwd = 2)
+
+```
+
+```{r}
+prec_nn_logistic1=performance(pred.im.log ,"prec")
+rec_nn_logistic1=performance(pred.im.log ,"rec")
+precision1=prec_nn_logistic1@y.values[[1]]
+recall1=rec_nn_logistic1@y.values[[1]]
+# Calculate F1 scores
+f1_scores1=(2*precision1*recall1)/(precision1+recall1)
+f1_scores1[is.na(f1_scores1)] = 0
+
+# Find the index of the maximum F1 score
+max_f1_index1=which.max(f1_scores1)
+best_f11=f1_scores1[max_f1_index1]
+best_thresh1=prec_nn_logistic1@x.values[[1]][max_f1_index1]
+
+# Print the best threshold and F1 score
+cat("Best Threshold:", round(best_thresh1, 3))
+cat(" Best F1 Score:", round(best_f11,3))
+
+prec_nn_logistic=performance(pred.bal.log,"prec")
+rec_nn_logistic=performance(pred.bal.log,"rec")
+precision=prec_nn_logistic@y.values[[1]]
+recall=rec_nn_logistic@y.values[[1]]
+# Calculate F1 scores
+f1_scores=(2*precision*recall)/(precision+recall)
+f1_scores[is.na(f1_scores)] = 0
+
+# Find the index of the maximum F1 score
+max_f1_index=which.max(f1_scores)
+best_f1=f1_scores[max_f1_index]
+best_thresh=prec_nn_logistic@x.values[[1]][max_f1_index]
+
+# Print the best threshold and F1 score
+cat("Best Threshold:", round(best_thresh, 3))
+cat(" Best F1 Score:", round(best_f1,3))
+```
+*NN RF Model*
+
+```{r}
+prec_nn_rf=performance(pred.im.rf,"prec")
+rec_nn_rf=performance(pred.im.rf,"rec")
+precision_rf=prec_nn_rf@y.values[[1]]
+recall_rf=rec_nn_rf@y.values[[1]]
+# Calculate F1 scores
+f1_scores_rf=(2*precision_rf*recall_rf)/(precision_rf+recall_rf)
+f1_scores_rf[is.na(f1_scores_rf)] = 0
+
+# Find the index of the maximum F1 score
+max_f1_index_rf=which.max(f1_scores_rf)
+best_f1_rf=f1_scores_rf[max_f1_index_rf]
+best_thresh_rf=prec_nn_rf@x.values[[1]][max_f1_index_rf]
+
+# Print the best threshold and F1 score
+cat("Best Threshold:", round(best_thresh_rf, 3))
+cat(" Best F1 Score:", round(best_f1_rf,3))
+```
+*NN RF US Model*
+
+```{r}
+prec_nn_rfu=performance(pred.bal.rf,"prec")
+rec_nn_rfu=performance(pred.bal.rf,"rec")
+precision_rfu=prec_nn_rfu@y.values[[1]]
+recall_rfu=rec_nn_rfu@y.values[[1]]
+# Calculate F1 scores
+f1_scores_rfu=(2*precision_rfu*recall_rfu)/(precision_rfu+recall_rfu)
+f1_scores_rfu[is.na(f1_scores_rfu)] = 0
+
+# Find the index of the maximum F1 score
+max_f1_index_rfu=which.max(f1_scores_rfu)
+best_f1_rfu=f1_scores_rfu[max_f1_index_rfu]
+best_thresh_rfu=prec_nn_rfu@x.values[[1]][max_f1_index_rfu]
+
+# Print the best threshold and F1 score
+cat("Best Threshold:", round(best_thresh_rfu, 3))
+cat(" Best F1 Score:", round(best_f1_rfu,3))
+```
+
+
+# Comparison of Models
+**ConFusion Matrices**
+*Imbalanced No CV*
+```{r}
+### Confusion Matrix: Imbalanced Model (No CV)
+# confusionMatrix(
+#   crf.preds$pred.im.class,
+#   crf.preds$loan_default,
+#   positive = "Yes"
+# )
+# 
+# ### Confusion Matrix: Imbalanced Model with Cross-Validation
+# confusionMatrix(
+#   crf.preds$pred.im.cv.class,
+#   crf.preds$loan_default,
+#   positive = "Yes"
+# )
+# 
+# ### Confusion Matrix: Balanced Model (No CV)
+# confusionMatrix(
+#   crf.preds$pred.bal.class,
+#   crf.preds$loan_default,
+#   positive = "Yes"
+# )
+# 
+# ### Confusion Matrix: Balanced Model with Cross-Validation
+# confusionMatrix(
+#   crf.preds$pred.bal.cv.class,
+#   crf.preds$loan_default,
+#   positive = "Yes"
+# )
+```{r}
+```
+
+
+**View Variable Importance**
+*Imbalanced No CV*
+```{r}
+rf$importance
+```
+
+```{r}
+randomForest::varImpPlot(rf1, type=2)
+```
+
+*Imbalanced Yes CV*
+```{r}
+rf1$importance 
+```
+
+```{r}
+randomForest::varImpPlot(rf1_us, type=2)
+```
+
+*Balanced No CV*
+```{r}
+rf1_us$importance 
+```
+
+```{r}
+randomForest::varImpPlot(rf2, type=2)
+```
+
+*Balanced Yes CV*
+```{r}
+rf2$importance
+```
+
+```{r}
+randomForest::varImpPlot(rf2_us, type=2)
+```
+
+```{r}
+saveRDS(rf1.preds, "rf_preds_clean_1.rds")
+saveRDS(rf2.preds, "rf_preds_clean_2.rds")
+
+df0 <- readRDS("3B_Project Team_train_raw.rds") 
+df1<- readRDS("train_clean_1.rds")
+df2 <- readRDS("train_clean_2.rds")
+
+df0 <- readRDS("3B_Project Team_train_raw.rds")
+write.csv(df, "train_clean_0.csv", row.names = FALSE)
+df1 <- readRDS("train_clean_1.rds")
+write.csv(df1, "train_clean_1.csv", row.names = FALSE)
+df2 <- readRDS("train_clean_2.rds")
+write.csv(df1, "train_clean_2.csv", row.names = FALSE)
+
+```
+

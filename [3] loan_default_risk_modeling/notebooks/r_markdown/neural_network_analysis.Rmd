@@ -1,0 +1,362 @@
+---
+title: "3B_Project Team_NN"
+author: "Project Repository"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    number_sections: yes
+    theme: readable
+    toc: yes
+    toc_float: yes
+    code_download: yes
+  word_document:
+    toc: no
+---
+
+```{r setup, include=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE,warning=FALSE)
+knitr::opts_chunk$set(fig.width=6, fig.height=4)
+
+if(require(pacman)==0)
+   {install.packages("pacman")}
+pacman::p_load(devtools,caret,cluster,dplyr,fastDummies,leaps,pacman,tidyverse,skimr,fastDummies,GGally,DataExplorer,ggrepel,ggthemes,dslabs,lubridate,janitor,e1071,scales,recipes,magrittr,forcats,tidycensus,zipcodeR,tidygeocoder,tigris,sf, purrr,ROCR,rpart,rpart.plot,keras,tensorflow)
+
+if (!require(mlba)) {
+  library(devtools)
+  install_github("gedeck/mlba/mlba", force=TRUE)
+}
+pacman::p_load(mlba,tidyverse)
+```
+
+```{r}
+# load
+train1 <- readRDS("3B_Project Team_train_raw.rds") 
+hold1 <- readRDS("3B_Project Team_holdout_raw.rds")
+# train1 <- readRDS("train_clean_1.rds") 
+# hold1 <- readRDS("hold_clean_1.rds")
+
+# process 
+train1_recipe <- recipe(loan_default ~ ., data = train1) %>%
+  step_range(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = FALSE)
+
+prep1 <- prep(train1_recipe)
+train1_ready <- bake(prep1, new_data = train1)
+hold1_ready <- bake(prep1, new_data = hold1)
+head(train1_ready)
+head(hold1_ready)
+
+# create balanced
+set.seed(123)
+maj1 <- train1_ready %>% dplyr::filter(loan_default == "No")
+min1 <- train1_ready %>% dplyr::filter(loan_default == "Yes")
+maj1_under <- maj1 %>% dplyr::sample_n(nrow(min1))
+train1_ready_us <- dplyr::bind_rows(min1, maj1_under) %>% dplyr::slice_sample(prop = 1)
+prop.table(table(train1_ready_us$loan_default))
+
+# load corresponding models
+rf1 <- readRDS("rf_clean_0.rds")
+rf1_us <- readRDS("rf_us_clean_0.rds")
+rf1_cv <- readRDS("rf_cv_clean_0.rds")
+rf1_cv_us <- readRDS("rf_cv_us_clean_0.rds")
+
+# randomForest::varImpPlot(rf1$finalModel, type=2)
+# randomForest::varImpPlot(rf1_us$finalModel, type=2)
+# randomForest::varImpPlot(rf2$finalModel, type=2)
+# randomForest::varImpPlot(rf2_us$finalModel, type=2)
+
+# get important vars
+imp1=varImp(rf1$finalModel,type=2)
+gini1_gt_10=rownames(imp1)[imp1Overall > 10]
+gini1_gt_10
+
+imp1_us=varImp(rf1_us$finalModel,type=2)
+gini1_gt_10_us=rownames(imp1_us)[imp1_us$Overall > 10]
+gini1_gt_10_us
+
+imp1_cv=varImp(rf1_cv$finalModel,type=2)
+gini1_gt_10_cv=rownames(imp1_cv)[imp1_cv$Overall > 10]
+gini1_gt_10_cv
+
+imp1_cv_us=varImp(rf1_cv_us$finalModel,type=2)
+gini1_gt_10_cv_us=rownames(imp1_cv_us)[imp1_cv_us$Overall > 10]
+gini1_gt_10_cv_us
+
+#im 
+rf1_train <- train1_ready %>%
+  select(any_of(gini1_gt_10), loan_default)
+rf1_cv_train <- train1_ready %>%
+  select(any_of(gini1_gt_10_cv), loan_default)
+
+rf1_test <- hold1_ready %>%
+  select(any_of(gini1_gt_10), loan_default)
+rf1_cv_test <- hold1_ready %>%
+  select(any_of(gini1_gt_10_cv), loan_default)
+
+#bal
+rf1_us_train <- train1_ready_us %>%
+  select(any_of(gini1_gt_10_us), loan_default)
+rf1_cv_us_train<- train1_ready_us %>%
+  select(any_of(gini1_gt_10_cv_us), loan_default)
+
+rf1_us_test <- hold1_ready %>%
+  select(any_of(gini1_gt_10_us), loan_default)
+rf1_cv_us_test <- hold1_ready %>%
+  select(any_of(gini1_gt_10_cv_us), loan_default)
+```
+
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     savePredictions = "final")
+
+# Set Up Parallel Processing
+cores=parallel::detectCores()
+cl=parallel::makeCluster(6)
+doParallel::registerDoParallel(cl)
+
+# Fit Model Imbalanced Sample
+nn_rf=train(
+  loan_default ~ .,
+  data = rf_train,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+nn_rf
+
+# Fit Model - Balanced Sample
+nn_rf_us=train(
+  loan_default ~ .,
+  data = rf_train_us,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+nn_rf_us
+
+# Fit Model Imbalanced Sample
+nn_rf=train(
+  loan_default ~ .,
+  data = rf_train,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+nn_rf
+
+# Fit Model - Balanced Sample
+nn_rf_us=train(
+  loan_default ~ .,
+  data = rf_train_us,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+nn_rf_us
+
+# Fit Model Imbalanced Sample
+nn_rf=train(
+  loan_default ~ .,
+  data = rf_train,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+nn_rf
+
+# Fit Model - Balanced Sample
+nn_rf_us=train(
+  loan_default ~ .,
+  data = rf1_us,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+nn_rf_us
+
+# Stop Cluster
+parallel::stopCluster(cl)
+foreach::registerDoSEQ()
+
+# Save nn object
+# Save nn object
+saveRDS(nn_rf1, "nn_rf_clean_0.rds")
+saveRDS(nn_rf1_cv, "nn_rf_cv_clean_0.rds")
+saveRDS(nn_rf1_us, "nn_rf_us_clean_0.rds")
+saveRDS(nn_rf1_cv_us, "nn_rf_cv_us_clean_0.rds")
+```
+
+
+```{r}
+# load
+train2 <- readRDS("train_clean_2.rds") 
+hold2 <- readRDS("hold_clean_2.rds")
+
+# process 
+train2_recipe <- recipe(loan_default ~ ., data = train2) %>%
+  step_range(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = FALSE)
+
+prep2 <- prep(train2_recipe)
+train2_ready <- bake(prep2, new_data = train2)
+hold2_ready <- bake(prep2, new_data = hold)2
+head(train2_ready)
+head(hold2_ready)
+
+# undersample
+set.seed(123)
+maj2 <- train2_ready %>% dplyr::filter(loan_default == "No")
+min2 <- train2_ready %>% dplyr::filter(loan_default == "Yes")
+maj2_under <- maj1 %>% dplyr::sample_n(nrow(min2))
+train2_ready_us <- dplyr::bind_rows(min2, maj2_under) %>% dplyr::slice_sample(prop = 1)
+prop.table(table(train2_ready_us$loan_default))
+
+#load models 
+rf2 <- readRDS("rf_clean_2.rds")
+rf2_us <- readRDS("rf_us_clean_2.rds")
+rf2_cv <- readRDS("rf_cv_clean_2.rds")
+rf2_cv_us <- readRDS("rf_cv_us_clean_2.rds")
+
+# get important vars
+imp2=varImp(rf2$finalModel,type=2)
+gini2_gt_10=rownames(imp2)[imp1Overall > 10]
+gini2_gt_10
+
+imp2_us=varImp(rf2_us$finalModel,type=2)
+gini2_gt_10_us=rownames(imp2_us)[imp2_us$Overall > 10]
+gini2_gt_10_us
+
+imp2_cv=varImp(rf2_cv$finalModel,type=2)
+gini2_gt_10_cv=rownames(imp2_cv)[imp2_cv$Overall > 10]
+gini2_gt_10_cv
+
+imp2_cv_us=varImp(rf1_cv_us$finalModel,type=2)
+gini2_gt_10_cv_us=rownames(imp2_cv_us)[imp2_cv_us$Overall > 10]
+gini2_gt_10_cv_us
+
+#im 
+rf2_train <- train2_ready %>%
+  select(any_of(gini2_gt_10), loan_default)
+rfw_cv_train <- train2_ready %>%
+  select(any_of(gini2_gt_10_cv), loan_default)
+
+rf2_test <- hold2_ready %>%
+  select(any_of(gini2_gt_10), loan_default)
+rf2_cv_test <- hold1_ready %>%
+  select(any_of(gini2_gt_10_cv), loan_default)
+
+#bal
+rf2_us_train <- train2_ready_us %>%
+  select(any_of(gini2_gt_10_us), loan_default)
+rf2_cv_us_train<- train1_ready_us %>%
+  select(any_of(gini2_gt_10_cv_us), loan_default)
+
+rf2_us_test <- hold2_ready %>%
+  select(any_of(gini2_gt_10_us), loan_default)
+rf2_cv_us_test <- hold2_ready %>%
+  select(any_of(gini2_gt_10_cv_us), loan_default)
+```
+
+# Caret NNET 
+```{r}
+ctrl <- trainControl(method = "cv", number = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     savePredictions = "final")
+
+# Set Up Parallel Processing
+cores=parallel::detectCores()
+cl=parallel::makeCluster(6)
+doParallel::registerDoParallel(cl)
+
+
+# Fit Model - Imbalanced Sample
+nn_rf2=train(
+  loan_default ~ .,
+  data = rf2_train,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+
+# Fit Model - Imbalanced Sample CV
+nn_rf2_cv=train(
+  loan_default ~ .,
+  data = rf2_cv_train,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+
+# Fit Model - Balanced Sample 
+nn_rf2_us=train(
+  loan_default ~ .,
+  data = rf2_us_train,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+
+# Fit Model - Balanced Sample CV
+nn_rf2_cv_us=train(
+  loan_default ~ .,
+  data = rf2_cv_us_train,
+  method = "nnet",
+  metric = "F1",
+  linout = FALSE,
+  tuneGrid = tuneGrid,
+  trace = FALSE,
+  maxit = 100,
+  trControl = trControl
+)
+
+# Stop Cluster
+parallel::stopCluster(cl)
+foreach::registerDoSEQ()
+
+# Save nn object
+saveRDS(nn_rf2, "nn_rf_clean_2.rds")
+saveRDS(nn_rf2_cv, "nn_rf_cv_clean_2.rds")
+saveRDS(nn_rf2_us, "nn_rf_us_clean_2.rds")
+saveRDS(nn_rf2_cv_us, "nn_rf_cv_us_clean_2.rds")
+```
