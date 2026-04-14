@@ -8,10 +8,6 @@ This repository is intentionally structured like a small engineering workspace i
 2. `sales_forecasting_lab/` — time-series style feature engineering and regression forecasting with synthetic retail data.
 3. `experiment_tracking_lab/` — MLflow experiment tracking example with multiple sklearn models.
 
-## Why this repo helps
-
-Hiring managers want to see more than model fitting. GitHub recommends making projects easy to understand with a helpful README, clear dependencies, and repository details, while MLflow emphasizes tracking parameters, metrics, code versions, and artifacts for reproducibility. citeturn472258search4turn472258search1
-
 ## Quick start
 
 ```bash
